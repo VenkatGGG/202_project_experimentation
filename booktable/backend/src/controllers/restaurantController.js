@@ -87,27 +87,62 @@ const addReviewAndManagerInfoStages = [
 
 exports.createRestaurant = async (req, res) => {
   try {
-    const {
-      name,
-      description,
-      cuisineType,
-      costRating,
-      // Address fields will be like req.body['address[street]']
-      // Hours fields will be like req.body['hours[opening]']
-      // Contact info fields if sent
-    } = req.body;
+    console.log('Request body:', req.body);
+    
+    // Check if req.body is undefined or empty
+    if (!req.body || Object.keys(req.body).length === 0) {
+      return res.status(400).json({ message: 'Request body is empty or undefined' });
+    }
 
-    const address = {
-      street: req.body['address[street]'],
-      city: req.body['address[city]'],
-      state: req.body['address[state]'],
-      zipCode: req.body['address[zipCode]'], // Assuming frontend sends zipCode not zip
-    };
+    // Handle both JSON and form-data formats
+    let restaurantData = {};
+    let address = {};
+    let hours = {};
+    let tables = [];
 
-    const hours = {
-      openingTime: req.body['hours[opening]'], // Match frontend keys
-      closingTime: req.body['hours[closing]'],
-    };
+    // If it's a JSON object (from regular JSON request)
+    if (typeof req.body === 'object' && !req.body['address[street]']) {
+      const { name, description, cuisineType, costRating, address: addressObj, hours: hoursObj, tables: tablesArray, photos } = req.body;
+      
+      restaurantData = { name, description, cuisineType, costRating };
+      address = addressObj || {};
+      hours = hoursObj || {};
+      tables = tablesArray || [];
+      
+      if (photos) {
+        restaurantData.photos = Array.isArray(photos) ? photos : [photos];
+      }
+    } 
+    // If it's form-data format
+    else {
+      restaurantData = {
+        name: req.body.name,
+        description: req.body.description,
+        cuisineType: req.body.cuisineType,
+        costRating: req.body.costRating
+      };
+      
+      address = {
+        street: req.body['address[street]'],
+        city: req.body['address[city]'],
+        state: req.body['address[state]'],
+        zipCode: req.body['address[zipCode]']
+      };
+      
+      hours = {
+        opening: req.body['hours[opening]'],
+        closing: req.body['hours[closing]']
+      };
+      
+      // Parse tables if they exist in form data
+      if (req.body.tables) {
+        try {
+          tables = JSON.parse(req.body.tables);
+        } catch (e) {
+          console.error('Error parsing tables:', e);
+        }
+      }
+    }
     
     // Example for contactInfo if you add it
     // const contactInfo = {
@@ -134,17 +169,16 @@ exports.createRestaurant = async (req, res) => {
 
       const s3UploadResult = await s3.upload(params).promise();
       photoUrl = s3UploadResult.Location;
-    } else {
-      // Decide if a photo is mandatory. If so, return an error.
-      // For now, we allow creation without a photo, photoUrl will be empty.
-      // You might want to return res.status(400).json({ message: 'Restaurant photo is required.' });
+    } else if (restaurantData.photos && restaurantData.photos.length > 0) {
+      // If photos were provided in the JSON data, use those
+      photoUrl = restaurantData.photos[0];
     }
 
     const newRestaurantData = {
-      name,
-      description,
-      cuisineType,
-      costRating,
+      name: restaurantData.name,
+      description: restaurantData.description,
+      cuisineType: restaurantData.cuisineType,
+      costRating: restaurantData.costRating,
       address,
       hours,
       // contactInfo, // if implemented
@@ -153,6 +187,11 @@ exports.createRestaurant = async (req, res) => {
       isApproved: false, // Restaurants start as not approved
       isPending: true,   // And are pending admin review
     };
+    
+    // Add tables if provided
+    if (tables && tables.length > 0) {
+      newRestaurantData.tables = tables;
+    }
 
     // Filter out undefined fields for hours and contactInfo if they are optional
     if (!hours.openingTime && !hours.closingTime) {
@@ -478,21 +517,213 @@ exports.getRestaurant = async (req, res) => {
 
 exports.updateRestaurant = async (req, res) => {
   try {
-    const restaurant = await Restaurant.findOne({
-      _id: req.params.id,
-      managerId: req.user._id
-    });
-
-    if (!restaurant) {
+    // First, check if the restaurant exists
+    const restaurantExists = await Restaurant.findById(req.params.id);
+    if (!restaurantExists) {
       return res.status(404).json({ error: 'Restaurant not found' });
     }
+    
+    // Then check if the user is authorized to update it
+    if (restaurantExists.managerId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: 'Not authorized to update this restaurant' });
+    }
+    
+    // Create an update object with all the fields to update
+    const updateData = {};
+    
+    if (req.body.name !== undefined) updateData.name = req.body.name;
+    if (req.body.description !== undefined) updateData.description = req.body.description;
+    if (req.body.cuisineType !== undefined) updateData.cuisineType = req.body.cuisineType;
+    
+    if (req.body.costRating !== undefined) {
+      const costRatingValue = parseInt(req.body.costRating);
+      if (!isNaN(costRatingValue) && costRatingValue >= 1 && costRatingValue <= 4) {
+        updateData.costRating = costRatingValue;
+      }
+    }
+    
+    if (req.body.capacity !== undefined) updateData.capacity = req.body.capacity;
+    
+    if (req.body['address[street]'] || req.body['address[city]'] || req.body['address[state]'] || req.body['address[zip]'] || req.body['address[zipCode]']) {
+      // Handle FormData format
+      updateData.address = {
+        street: req.body['address[street]'] || restaurantExists.address?.street,
+        city: req.body['address[city]'] || restaurantExists.address?.city,
+        state: req.body['address[state]'] || restaurantExists.address?.state,
+        zip: req.body['address[zip]'] || req.body['address[zipCode]'] || restaurantExists.address?.zip
+      };
+    } else if (req.body.address) {
+      // Handle JSON format
+      updateData.address = {
+        street: req.body.address.street || restaurantExists.address?.street,
+        city: req.body.address.city || restaurantExists.address?.city,
+        state: req.body.address.state || restaurantExists.address?.state,
+        zip: req.body.address.zip || restaurantExists.address?.zip
+      };
+    }
+    
+    // Handle hours if provided
+    if (req.body['hours[opening]'] || req.body['hours[closing]']) {
+      // Handle FormData format
+      updateData.hours = {
+        opening: req.body['hours[opening]'] || restaurantExists.hours?.opening,
+        closing: req.body['hours[closing]'] || restaurantExists.hours?.closing
+      };
+    } else if (req.body.hours) {
+      // Handle JSON format
+      updateData.hours = {
+        opening: req.body.hours.opening || restaurantExists.hours?.opening,
+        closing: req.body.hours.closing || restaurantExists.hours?.closing
+      };
+    }
+    
+    // Handle contact info if provided
+    if (req.body['contactInfo[phone]'] || req.body['contactInfo[email]']) {
+      // Handle FormData format
+      updateData.contactInfo = {
+        phone: req.body['contactInfo[phone]'] || restaurantExists.contactInfo?.phone,
+        email: req.body['contactInfo[email]'] || restaurantExists.contactInfo?.email
+      };
+    } else if (req.body.contactInfo) {
+      // Handle JSON format
+      updateData.contactInfo = {
+        phone: req.body.contactInfo.phone || restaurantExists.contactInfo?.phone,
+        email: req.body.contactInfo.email || restaurantExists.contactInfo?.email
+      };
+    }
+    
+    // Handle tables if provided
+    let validTables = [];
+    if (req.body.tables) {
+      // Handle JSON format
+      try {
+        // If it's a string (from FormData), parse it
+        let tablesData;
+        
+        if (typeof req.body.tables === 'string') {
+          try {
+            tablesData = JSON.parse(req.body.tables);
+          } catch (parseError) {
+            tablesData = [];
+          }
+        } else if (Array.isArray(req.body.tables)) {
+          tablesData = req.body.tables;
+        } else {
+          tablesData = [];
+        }
+        
+        // Validate table data
+        if (Array.isArray(tablesData)) {
+          validTables = tablesData
+            .filter(table => 
+              table && 
+              table.tableSize && Number.isInteger(parseInt(table.tableSize)) && 
+              table.count && Number.isInteger(parseInt(table.count)) && 
+              parseInt(table.count) > 0
+            )
+            .map(table => ({
+              tableSize: parseInt(table.tableSize),
+              count: parseInt(table.count)
+            }));
+        }
+      } catch (error) {
+        validTables = [];
+      }
+      
+      if (validTables.length > 0) {
+        updateData.tables = validTables;
+        
+        // Update available tables based on the physical tables
+        // Get today's date at midnight
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        // Generate available times based on opening/closing hours
+        const openingHour = updateData.hours?.opening || restaurantExists.hours?.opening || '09:00';
+        const closingHour = updateData.hours?.closing || restaurantExists.hours?.closing || '22:00';
+        
+        const [openHour, openMinute] = openingHour.split(':').map(Number);
+        const [closeHour, closeMinute] = closingHour.split(':').map(Number);
+        
+        const availableTimes = [];
+        let currentHour = openHour;
+        let currentMinute = openMinute;
+        
+        // Generate time slots every 30 minutes
+        while (currentHour < closeHour || (currentHour === closeHour && currentMinute < closeMinute)) {
+          availableTimes.push(`${currentHour.toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`);
+          
+          currentMinute += 30;
+          if (currentMinute >= 60) {
+            currentHour += 1;
+            currentMinute = 0;
+          }
+        }
+        
+        // Create available tables for the next 30 days
+        const availableTablesData = [];
+        
+        for (let i = 0; i < 30; i++) {
+          const date = new Date(today);
+          date.setDate(today.getDate() + i);
+          
+          const tablesForDate = {
+            date: date,
+            tables: validTables.map(table => ({
+              tableSize: table.tableSize,
+              availableTimes: [...availableTimes] // Clone the array
+            }))
+          };
+          
+          availableTablesData.push(tablesForDate);
+        }
+        
+        updateData.availableTables = availableTablesData;
+      }
+    }
+    
+    // Handle photos
+    // 1. Check for new uploaded photo
+    if (req.file) {
+      // Upload to S3 and get the URL
+      const photoUrl = await uploadToS3(req.file);
+      if (photoUrl) {
+        // Add the new photo to the existing photos
+        updateData.photos = [...(restaurantExists.photos || []), photoUrl];
+      }
+    } 
+    // 2. Check for existing photos from form
+    else if (req.body.existingPhotos) {
+      try {
+        const existingPhotos = JSON.parse(req.body.existingPhotos);
+        if (Array.isArray(existingPhotos)) {
+          updateData.photos = existingPhotos;
+        }
+      } catch (error) {
+        // Silently handle error
+      }
+    }
+    // 3. Check for photos in JSON format
+    else if (req.body.photos) {
+      updateData.photos = Array.isArray(req.body.photos) ? req.body.photos : [req.body.photos];
+    }
+    
 
-    Object.assign(restaurant, req.body);
-    await restaurant.save();
-    res.json(restaurant);
+    
+    // Use findByIdAndUpdate for a more reliable update
+    const updatedRestaurant = await Restaurant.findByIdAndUpdate(
+      req.params.id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+    
+    if (!updatedRestaurant) {
+      return res.status(500).json({ error: 'Failed to update restaurant' });
+    }
+    
+    res.json(updatedRestaurant);
   } catch (error) {
-    console.error('Error updating restaurant:', error);
-    res.status(500).json({ error: 'Error updating restaurant' });
+    res.status(500).json({ error: 'Error updating restaurant', details: error.message });
   }
 };
 

@@ -20,12 +20,48 @@ const restaurantSchema = new mongoose.Schema({
     opening: String,
     closing: String
   },
+  // Physical tables in the restaurant
+  tables: [{
+    tableSize: {
+      type: Number,
+      required: true
+    },
+    count: {
+      type: Number,
+      required: true,
+      default: 0
+    }
+  }],
+  // Available tables for specific dates
   availableTables: [{
-    date: Date,
+    date: {
+      type: Date,
+      required: true
+    },
     tables: [{
       tableSize: Number,
       availableTimes: [String]
     }]
+  }],
+  // Bookings made at the restaurant
+  bookings: [{
+    bookingId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Booking'
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    date: Date,
+    time: String,
+    tableSize: Number,
+    numberOfGuests: Number,
+    status: {
+      type: String,
+      enum: ['confirmed', 'cancelled', 'completed', 'no-show'],
+      default: 'confirmed'
+    }
   }],
   cuisineType: {
     type: String,

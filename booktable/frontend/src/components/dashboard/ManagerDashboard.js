@@ -181,13 +181,16 @@ const ManagerDashboard = () => {
   const handleOpenRestaurantForm = (restaurantToEdit = null) => {
     dispatch(clearRestaurantError());
     if (restaurantToEdit) {
+      console.log('Opening edit form for restaurant:', restaurantToEdit);
       // Fetch full details for editing if not already complete in managerRestaurants list
       // Or ensure currentRestaurant is set for the form
       dispatch(getRestaurant(restaurantToEdit._id)); // This will set currentRestaurant
       setIsEditing(true);
+      setSelectedRestaurant(restaurantToEdit); // Set the selected restaurant for editing
     } else {
       dispatch(clearCurrentRestaurant()); // Clear for new form
       setIsEditing(false);
+      setSelectedRestaurant(null); // Clear selected restaurant
     }
     setRestaurantFormOpen(true);
   };
@@ -199,18 +202,38 @@ const ManagerDashboard = () => {
   };
 
   const handleRestaurantFormSubmit = async (formData) => {
-    if (isEditing && currentRestaurant) {
-      await dispatch(updateRestaurant({ id: currentRestaurant._id, data: formData }));
-    } else {
-      const randomImage = predefinedRestaurantImages[Math.floor(Math.random() * predefinedRestaurantImages.length)];
-      // Send 'photos' as an array with the random image, remove isApproved/isPending
-      await dispatch(createRestaurant({ ...formData, photos: [randomImage] }));
-    }
-    // Check for specific error from createRestaurant/updateRestaurant if slice provides it
-    // Revert to using restaurantError from useSelector
-    if (!restaurantError) { 
+    try {
+      // formData is already a FormData object from the RestaurantForm component
+      console.log('Submitting restaurant form with data:', formData);
+      
+      if (isEditing && currentRestaurant) {
+        // Log the data being sent for debugging
+        console.log('Updating restaurant with ID:', currentRestaurant._id);
+        
+        // For editing, we need to pass the restaurant ID
+        const result = await dispatch(updateRestaurant({ 
+          id: currentRestaurant._id, 
+          restaurantData: formData 
+        })).unwrap();
+        
+        console.log('Update result:', result);
+        dispatch(showFeedback({ message: 'Restaurant updated successfully!', severity: 'success' }));
+      } else {
+        // For new restaurants, if no photo is provided, use a random one
+        if (!formData.get('photo') && !formData.get('existingPhotos')) {
+          const randomImage = predefinedRestaurantImages[Math.floor(Math.random() * predefinedRestaurantImages.length)];
+          formData.append('photos', JSON.stringify([randomImage]));
+        }
+        
+        await dispatch(createRestaurant(formData)).unwrap();
+        dispatch(showFeedback({ message: 'Restaurant added successfully!', severity: 'success' }));
+      }
+      
       handleCloseRestaurantForm();
       dispatch(fetchManagedRestaurants()); // Re-fetch to update list
+    } catch (error) {
+      console.error('Failed to save restaurant:', error);
+      dispatch(showFeedback({ message: `Error: ${error.message || 'Failed to save restaurant'}`, severity: 'error' }));
     }
   };
 
@@ -258,48 +281,6 @@ const ManagerDashboard = () => {
     setBookingViewRestaurant(null);
     // No need to dispatch clearRestaurantBookings here, useEffect will handle it
     dispatch(clearError()); // Clear any errors when closing dialog
-  };
-
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-
-    const data = new FormData();
-    data.append('name', formData.name);
-    data.append('description', formData.description);
-    data.append('cuisineType', formData.cuisineType);
-    // Address fields might need to be stringified if backend expects an object
-    // or appended individually if backend expects flat structure for address.
-    // Assuming backend can handle address fields like 'address.street'
-    data.append('address[street]', formData.address.street);
-    data.append('address[city]', formData.address.city);
-    data.append('address[state]', formData.address.state);
-    data.append('address[zipCode]', formData.address.zipCode);
-
-    // Append the photo if one is selected
-    if (selectedPhoto) {
-      data.append('photo', selectedPhoto); // 'photo' must match backend multer field name
-    }
-
-    try {
-      if (isEditing) {
-        // For editing, if photo is changed, it needs to be handled.
-        // The current setup with FormData is more for creation.
-        // Editing might send JSON and a separate request for photo update if changed,
-        // or the backend /edit endpoint needs to handle multipart/form-data too.
-        // For now, let's assume editing doesn't change the photo here or is handled separately.
-        // If editing needs to upload a new photo, the backend endpoint must support FormData.
-        await dispatch(updateRestaurant({ id: currentRestaurant._id, restaurantData: formData })).unwrap();
-        dispatch(showFeedback({ message: 'Restaurant updated successfully!', severity: 'success' }));
-      } else {
-        await dispatch(createRestaurant(data)).unwrap(); // Pass FormData to createRestaurant
-        dispatch(showFeedback({ message: 'Restaurant added successfully! It is pending approval.', severity: 'success' }));
-      }
-      fetchManagedRestaurants();
-      handleCloseDialog();
-    } catch (error) {
-      console.error('Failed to save restaurant:', error);
-      dispatch(showFeedback({ message: error.message || 'Failed to save restaurant', severity: 'error' }));
-    }
   };
 
   const handleDelete = async (id) => {
@@ -677,21 +658,7 @@ const ManagerDashboard = () => {
                         <Button
                           variant="outlined"
                           size="small"
-                          onClick={() => {
-                            setSelectedRestaurant(restaurant);
-                            setFormData({
-                              name: restaurant.name,
-                              address: {
-                                street: restaurant.address?.street || '',
-                                city: restaurant.address?.city || '',
-                                state: restaurant.address?.state || '',
-                                zipCode: restaurant.address?.zipCode || '',
-                              },
-                              cuisineType: restaurant.cuisineType || '',
-                              description: restaurant.description || '',
-                            });
-                            setDialogOpen(true);
-                          }}
+                          onClick={() => handleOpenRestaurantForm(restaurant)}
                           sx={{ 
                             flex: 1,
                             textTransform: 'none',
@@ -770,7 +737,27 @@ const ManagerDashboard = () => {
           {selectedRestaurant ? 'Edit Restaurant' : 'Add New Restaurant'}
         </DialogTitle>
         <DialogContent sx={{ pb: 2 }}>
-          <Box component="form" sx={{ mt: 2 }}>
+          <Box component="form" onSubmit={(e) => {
+            e.preventDefault();
+            // Create FormData from the form inputs
+            const data = new FormData();
+            data.append('name', formData.name);
+            data.append('description', formData.description);
+            data.append('cuisineType', formData.cuisineType);
+            // Address fields
+            data.append('address[street]', formData.address.street);
+            data.append('address[city]', formData.address.city);
+            data.append('address[state]', formData.address.state);
+            data.append('address[zipCode]', formData.address.zipCode);
+
+            // Append the photo if one is selected
+            if (selectedPhoto) {
+              data.append('photo', selectedPhoto);
+            }
+            
+            // Call the restaurant form submit handler
+            handleRestaurantFormSubmit(data);
+          }} sx={{ mt: 2 }}>
             <TextField
               fullWidth
               label="Restaurant Name"
@@ -1033,7 +1020,7 @@ const ManagerDashboard = () => {
             Cancel
           </Button>
           <Button 
-            onClick={handleSubmit}
+            type="submit"
             variant="contained"
             sx={{ 
               textTransform: 'none',
@@ -1115,6 +1102,77 @@ const ManagerDashboard = () => {
             }}
           >
             Delete Restaurant
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Restaurant Form Dialog */}
+      <Dialog
+        open={restaurantFormOpen}
+        onClose={handleCloseRestaurantForm}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: '16px',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)',
+          }
+        }}
+      >
+        <DialogTitle sx={{ 
+          pb: 1,
+          fontWeight: 600,
+          fontSize: '1.25rem',
+        }}>
+          {isEditing ? 'Edit Restaurant' : 'Add New Restaurant'}
+        </DialogTitle>
+        <DialogContent>
+          {currentRestaurant && (
+            <RestaurantForm
+              key={currentRestaurant._id} // Add a key to force re-render when restaurant changes
+              initialData={currentRestaurant}
+              onSubmit={handleRestaurantFormSubmit}
+              loading={restaurantLoading}
+              error={restaurantError}
+            />
+          )}
+        </DialogContent>
+        <DialogActions sx={{ padding: '16px 24px', borderTop: `1px solid ${colors.divider}`}}>
+          <Button 
+            onClick={handleCloseRestaurantForm}
+            sx={{ 
+              textTransform: 'none',
+              px: 2,
+              py: 1,
+              borderRadius: '8px',
+              color: colors.text.secondary,
+              '&:hover': {
+                backgroundColor: alpha(colors.text.secondary, 0.08),
+              },
+            }}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={() => {
+              const form = document.querySelector('form');
+              if (form) form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+            }}
+            variant="contained"
+            sx={{ 
+              textTransform: 'none',
+              px: 2,
+              py: 1,
+              borderRadius: '8px',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+              '&:hover': {
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
+                transform: 'translateY(-1px)',
+              },
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {isEditing ? 'Update Restaurant' : 'Add Restaurant'}
           </Button>
         </DialogActions>
       </Dialog>

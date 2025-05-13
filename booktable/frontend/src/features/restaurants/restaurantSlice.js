@@ -66,14 +66,44 @@ export const createRestaurant = createAsyncThunk(
 
 export const updateRestaurant = createAsyncThunk(
   'restaurants/update',
-  async ({ id, data }, { getState, rejectWithValue }) => {
+  async ({ id, restaurantData }, { getState, rejectWithValue }) => {
     try {
+      console.log('Updating restaurant with id:', id);
+      console.log('Restaurant data type:', restaurantData instanceof FormData ? 'FormData' : typeof restaurantData);
       const { token } = getState().auth;
-      const response = await api.put(`/restaurants/${id}`, data, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      
+      // Check if restaurantData is FormData or regular object
+      let requestConfig = {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+        }
+      };
+      
+      // If it's FormData, don't modify it and set the correct content type
+      if (restaurantData instanceof FormData) {
+        requestConfig.headers['Content-Type'] = 'multipart/form-data';
+      } else {
+        // If it's a regular object, format it
+        restaurantData = {
+          ...restaurantData,
+          // Format hours if they exist and are moment objects
+          hours: restaurantData.hours ? {
+            opening: restaurantData.hours.opening && typeof restaurantData.hours.opening.format === 'function' 
+              ? restaurantData.hours.opening.format('HH:mm') 
+              : restaurantData.hours.opening,
+            closing: restaurantData.hours.closing && typeof restaurantData.hours.closing.format === 'function' 
+              ? restaurantData.hours.closing.format('HH:mm') 
+              : restaurantData.hours.closing
+          } : undefined,
+          // Filter out tables with zero count if present
+          tables: restaurantData.tables ? restaurantData.tables.filter(table => table.count > 0) : undefined
+        };
+      }
+      
+      const response = await api.put(`/restaurants/${id}`, restaurantData, requestConfig);
       return response.data;
     } catch (error) {
+      console.error('Error updating restaurant:', error);
       return rejectWithValue(error.response?.data || { error: 'Failed to update restaurant' });
     }
   }
