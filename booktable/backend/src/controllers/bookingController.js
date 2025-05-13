@@ -8,16 +8,20 @@ const Notification = require('../models/Notification');
 exports.createBooking = async (req, res) => {
   try {
     console.log('Creating booking with data:', req.body);
-    const { restaurantId, date, time, partySize } = req.body;
-    const userId = req.user._id;
+    const { restaurantId, date, time, partySize } = req.body; 
+    const userId = req.user._id; 
 
-    if (!restaurantId || !date || !time || !partySize) {
-      console.log('Missing required booking information:', { restaurantId, date, time, partySize });
-      return res.status(400).json({ error: 'Missing required booking information.' });
+    console.log(`Received booking request: userId=${userId}, restaurantId=${restaurantId}, date=${date}, time=${time}, partySize=${partySize}`);
+    console.log(`Type of received date: ${typeof date}`);
+
+    if (!userId || !restaurantId || !date || !time || !partySize) {
+      console.log('Missing required booking information:', { userId, restaurantId, date, time, partySize });
+      return res.status(400).json({ error: 'Missing required booking information' });
     }
+
     const numericPartySize = parseInt(partySize, 10);
     if (isNaN(numericPartySize) || numericPartySize <= 0) {
-      return res.status(400).json({ error: 'Invalid party size.' });
+      return res.status(400).json({ error: 'Invalid party size' });
     }
 
     const restaurant = await Restaurant.findById(restaurantId);
@@ -25,10 +29,16 @@ exports.createBooking = async (req, res) => {
       return res.status(404).json({ error: 'Restaurant not found' });
     }
 
-    const searchDateStr = moment(date).utc().format('YYYY-MM-DD');
-    const availabilityForDate = restaurant.availableTables.find(entry => 
-      moment(entry.date).utc().format('YYYY-MM-DD') === searchDateStr
-    );
+    // Use the exact date string from the client without timezone conversion
+    // This ensures we're searching for tables on the exact date the user selected
+    const searchDateStr = date; // The date is already in YYYY-MM-DD format from the client
+    console.log(`Searching for tables on date: ${searchDateStr}`); 
+    
+    const availabilityForDate = restaurant.availableTables.find(entry => {
+      const entryDateStr = moment(entry.date).format('YYYY-MM-DD');
+      console.log(`Comparing with available date: ${entryDateStr}`);
+      return entryDateStr === searchDateStr;
+    });
 
     if (!availabilityForDate) {
       return res.status(400).json({ error: 'No tables available for this date' });
@@ -42,10 +52,14 @@ exports.createBooking = async (req, res) => {
       return res.status(400).json({ error: 'No suitable table available for the requested time and party size' });
     }
 
+    // Prefix the date string to ensure it's stored as a literal string
+    const storableDate = `RAW_DATE_STR:${date}`;
+    console.log(`Storing date as: ${storableDate}`);
+    
     const booking = new Booking({
       userId,
       restaurantId,
-      date: moment(date).utc().startOf('day').toDate(),
+      date: storableDate, // Store the prefixed string
       time,
       partySize: numericPartySize,
       tableSize: suitableTable.tableSize,
@@ -104,9 +118,11 @@ exports.createBooking = async (req, res) => {
     
     // Create a notification for successful booking
     try {
+      // Create notification using the exact date string that was sent by the client
+      // This ensures the notification shows the same date the user selected
       await Notification.create({
-        userId: populatedBooking.userId._id, // Assuming userId is populated and has _id
-        message: `Your booking at ${populatedBooking.restaurantId.name} for ${moment(populatedBooking.date).format('MMMM Do YYYY')} at ${populatedBooking.time} is confirmed.`,
+        userId: populatedBooking.userId._id,
+        message: `Your booking at ${populatedBooking.restaurantId.name} for ${moment(date, 'YYYY-MM-DD').format('MMMM Do YYYY')} at ${populatedBooking.time} is confirmed.`,
         type: 'booking_confirmed',
         bookingId: populatedBooking._id
       });
@@ -287,11 +303,31 @@ exports.getBookingAnalytics = async (req, res) => {
         }
       },
       {
+        $addFields: {
+          // Extract the 'YYYY-MM-DD' part from 'RAW_DATE_STR:YYYY-MM-DD'
+          // "RAW_DATE_STR:" is 13 characters. Date 'YYYY-MM-DD' is 10 characters.
+          dateStringOnly: { $substrCP: ['$date', 13, 10] }
+        }
+      },
+      {
+        $addFields: {
+          // Convert the extracted string to a BSON Date
+          convertedBookingDate: {
+            $dateFromString: {
+              dateString: '$dateStringOnly',
+              format: '%Y-%m-%d', // Specify the format for 'YYYY-MM-DD'
+              onError: null, // Optional: return null if parsing fails
+              onNull: null   // Optional: return null if dateStringOnly is null
+            }
+          }
+        }
+      },
+      {
         $group: {
           _id: {
-            year: { $year: '$date' },
-            month: { $month: '$date' },
-            day: { $dayOfMonth: '$date' }
+            year: { $year: '$convertedBookingDate' },
+            month: { $month: '$convertedBookingDate' },
+            day: { $dayOfMonth: '$convertedBookingDate' }
           },
           totalBookings: { $sum: 1 },
           averagePartySize: { $avg: '$partySize' }
@@ -304,6 +340,7 @@ exports.getBookingAnalytics = async (req, res) => {
 
     res.json(analytics);
   } catch (error) {
-    res.status(500).json({ error: 'Error fetching booking analytics' });
+    console.error('Error fetching booking analytics:', error); // Enhanced server-side logging
+    res.status(500).json({ error: 'Error fetching booking analytics', details: error.message });
   }
 };
