@@ -85,6 +85,35 @@ const addReviewAndManagerInfoStages = [
   }
 ];
 
+// Helper function to generate time slots
+// Example: generateTimeSlots("10:00", "22:00", 30)
+// Returns: ["10:00", "10:30", ..., "21:30"] (does not include closing time itself as a start slot)
+const generateTimeSlots = (openingTimeStr, closingTimeStr, intervalMinutes = 30) => {
+  const slots = [];
+  if (!openingTimeStr || !closingTimeStr) {
+    console.warn('[generateTimeSlots] Opening or closing time is undefined. Cannot generate slots.');
+    return slots;
+  }
+  const [openH, openM] = openingTimeStr.split(':').map(Number);
+  const [closeH, closeM] = closingTimeStr.split(':').map(Number);
+
+  // Use a fixed date for time calculations, only hours and minutes matter here
+  let currentTime = moment().hours(openH).minutes(openM).seconds(0).milliseconds(0);
+  let closingTime = moment().hours(closeH).minutes(closeM).seconds(0).milliseconds(0);
+
+  // If closing time is on the next day (e.g. opens 10 PM, closes 2 AM relative to a single day's perspective)
+  // or if closing time is earlier than opening time on the same day (e.g. 08:00 close, 10:00 open - assumed next day)
+  if (closingTime.isSameOrBefore(currentTime)) {
+    closingTime.add(1, 'day');
+  }
+
+  while (currentTime.isBefore(closingTime)) {
+    slots.push(currentTime.format('HH:mm'));
+    currentTime.add(intervalMinutes, 'minutes');
+  }
+  return slots;
+};
+
 exports.createRestaurant = async (req, res) => {
   try {
     console.log('Request body:', req.body);
@@ -120,6 +149,7 @@ exports.createRestaurant = async (req, res) => {
         description: req.body.description,
         cuisineType: req.body.cuisineType,
         costRating: req.body.costRating
+        // DO NOT put req.body.tables directly into restaurantData here if it's a string
       };
       
       address = {
@@ -136,11 +166,17 @@ exports.createRestaurant = async (req, res) => {
       
       // Parse tables if they exist in form data
       if (req.body.tables) {
+        console.log('[createRestaurant] Received req.body.tables (string):', req.body.tables);
         try {
           tables = JSON.parse(req.body.tables);
+          // Log the parsed array. Using JSON.stringify for cleaner log output of the array.
+          console.log('[createRestaurant] Successfully parsed req.body.tables. Local tables variable is now:', JSON.stringify(tables, null, 2));
         } catch (e) {
-          console.error('Error parsing tables:', e);
+          console.error('[createRestaurant] Error parsing tables string from req.body.tables. String was:', req.body.tables, 'Error:', e);
+          // tables remains its initial value, e.g., []
         }
+      } else {
+        console.log('[createRestaurant] req.body.tables is not present.');
       }
     }
     
@@ -180,25 +216,53 @@ exports.createRestaurant = async (req, res) => {
       cuisineType: restaurantData.cuisineType,
       costRating: restaurantData.costRating,
       address,
-      hours,
-      // contactInfo, // if implemented
-      managerId: req.user._id, // From auth middleware
-      photos: photoUrl ? [photoUrl] : [], // Store S3 URL in photos array
-      isApproved: false, // Restaurants start as not approved
-      isPending: true,   // And are pending admin review
+      hours, // contains hours.opening and hours.closing
+      contactInfo: restaurantData.contactInfo || {}, // Ensure contactInfo is an object
+      managerId: req.user._id, 
+      photos: photoUrl ? [photoUrl] : [], 
+      isApproved: false, 
+      isPending: true, 
+      tables: [], // Initialize physical tables array
+      availableTables: [] // Initialize availableTables array
     };
     
-    // Add tables if provided
-    if (tables && tables.length > 0) {
-      newRestaurantData.tables = tables;
+    // Assign parsed physical tables to newRestaurantData.tables
+    if (Array.isArray(tables) && tables.length > 0) {
+      newRestaurantData.tables = tables; // Assign the PARSED array of physical tables
+      console.log('[createRestaurant] Assigned physical tables to newRestaurantData.tables:', JSON.stringify(newRestaurantData.tables, null, 2));
+
+      // Generate availableTimes based on restaurant's hours
+      const dailyAvailableTimes = generateTimeSlots(newRestaurantData.hours.opening, newRestaurantData.hours.closing);
+      console.log('[createRestaurant] Generated dailyAvailableTimes:', dailyAvailableTimes);
+
+      if (dailyAvailableTimes.length > 0) {
+        const numberOfDaysToGenerate = 30; // Generate for next 30 days
+        for (let i = 0; i < numberOfDaysToGenerate; i++) {
+          const currentDate = moment().add(i, 'days');
+          const dateStr = `RAW_DATE_STR:${currentDate.format('YYYY-MM-DD')}`;
+
+          const dailyEntry = {
+            date: dateStr,
+            tables: newRestaurantData.tables.map(physicalTable => ({
+              tableSize: physicalTable.tableSize,
+              // For now, assume all physical tables of a certain size share the same broad availability slots.
+              // Count of physical tables of this size (physicalTable.count) is not directly part of this schema structure
+              // but is important for booking logic later.
+              availableTimes: [...dailyAvailableTimes] 
+            }))
+          };
+          newRestaurantData.availableTables.push(dailyEntry);
+        }
+        console.log(`[createRestaurant] Generated ${newRestaurantData.availableTables.length} days of availability.`);
+      } else {
+        console.warn('[createRestaurant] No daily available times generated, check opening/closing hours. Skipping availableTables generation.');
+      }
+
+    } else {
+      console.warn('[createRestaurant] No physical tables parsed or provided. Cannot generate availableTables. req.body.tables was:', req.body.tables);
     }
 
-    // Filter out undefined fields for hours and contactInfo if they are optional
-    if (!hours.openingTime && !hours.closingTime) {
-      delete newRestaurantData.hours;
-    }
-    // Similarly for contactInfo if it's optional
-
+    console.log('[createRestaurant] newRestaurantData to be saved (final check):', JSON.stringify(newRestaurantData, null, 2));
     const restaurant = new Restaurant(newRestaurantData);
     await restaurant.save();
     res.status(201).json(restaurant);
@@ -323,15 +387,22 @@ exports.searchRestaurants = async (req, res) => {
     let initialQuery = { isApproved: true };
 
     if (location) {
+      // Safely handle restaurants without address information
       initialQuery['$or'] = [
         { 'address.city': new RegExp(location, 'i') },
         { 'address.zip': location }
       ];
+      
+      // Add a check to ensure address exists
+      initialQuery['address'] = { $exists: true, $ne: null };
     }
 
     if (date && time) { // New condition: search if date and time are present
-      const [yearStr, monthStr, dayStr] = date.split('-');
-      const searchDate = new Date(Date.UTC(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, parseInt(dayStr, 10)));
+      // Parse the date string without converting to UTC to preserve the date
+      const searchDate = new Date(date);
+      searchDate.setHours(0, 0, 0, 0);
+      
+      console.log(`Searching for date: ${date}, parsed as: ${searchDate.toISOString()}`);
       
       let numericPartySize = 0; // Default if partySize is not provided or invalid
       let filterByPartySize = false;
@@ -373,7 +444,10 @@ exports.searchRestaurants = async (req, res) => {
               $filter: {
                 input: "$availableTables",
                 as: "at",
-                cond: { $eq: [ "$$at.date", searchDate ] }
+                cond: {
+                  // Directly compare the prefixed date string
+                  $eq: [ "$$at.date", `RAW_DATE_STR:${date}` ] 
+                }
               }
             } // Correctly closes dateEntry
           } // Correctly closes $addFields
@@ -660,24 +734,61 @@ exports.updateRestaurant = async (req, res) => {
           }
         }
         
+        // Get existing available tables
+        const existingAvailableTables = restaurantExists.availableTables || [];
+        
+        // Create a map of existing dates to their tables
+        const existingDateMap = new Map();
+        existingAvailableTables.forEach(dateEntry => {
+          const dateStr = new Date(dateEntry.date).toISOString().split('T')[0];
+          existingDateMap.set(dateStr, dateEntry);
+        });
+        
         // Create available tables for the next 30 days
         const availableTablesData = [];
         
         for (let i = 0; i < 30; i++) {
           const date = new Date(today);
           date.setDate(today.getDate() + i);
+          const dateStr = date.toISOString().split('T')[0];
           
-          const tablesForDate = {
-            date: date,
-            tables: validTables.map(table => ({
-              tableSize: table.tableSize,
-              availableTimes: [...availableTimes] // Clone the array
-            }))
-          };
+          // Check if we have existing tables for this date
+          const existingEntry = existingDateMap.get(dateStr);
           
-          availableTablesData.push(tablesForDate);
+          // For the first 3 days, always use the new tables configuration
+          // For other days, preserve existing bookings if available
+          if (i < 3 || !existingEntry) {
+            // For the first 3 days or if no existing entry, create new tables
+            const tablesForDate = {
+              tables: validTables.map(table => ({
+                tableSize: table.tableSize,
+                count: table.count,
+                availableTimes: availableTimes // Use the generated times
+              }))
+            };
+            const formattedDate = `RAW_DATE_STR:${dateStr}`;
+            tablesForDate.date = formattedDate; // Assign the formatted date
+
+            availableTablesData.push(tablesForDate);
+          } else {
+            // Preserve existing entry for days beyond the 3-day override window
+            // Important: Ensure existing entries are also stored with the prefix if they aren't already
+            if (existingEntry && typeof existingEntry.date === 'object' && existingEntry.date instanceof Date) {
+                // If it's a Date object, convert it
+                const existingDateStr = existingEntry.date.toISOString().split('T')[0];
+                existingEntry.date = `RAW_DATE_STR:${existingDateStr}`;
+            } else if (existingEntry && typeof existingEntry.date === 'string' && !existingEntry.date.startsWith('RAW_DATE_STR:')){
+                // If it's a string but lacks the prefix (legacy data?), add it
+                // Be cautious with assumptions about the string format here
+                if (existingEntry.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                    existingEntry.date = `RAW_DATE_STR:${existingEntry.date}`;
+                }
+                // Add more checks if other legacy string formats exist
+            }
+            // If it already has the prefix or is not a recognizable format, leave it as is
+            availableTablesData.push(existingEntry);
+          }
         }
-        
         updateData.availableTables = availableTablesData;
       }
     }
