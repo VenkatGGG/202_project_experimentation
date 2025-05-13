@@ -66,7 +66,12 @@ const sendBookingConfirmationEmail = async (user, booking, restaurant, retries =
     return;
   }
 
-  const formattedDate = moment(booking.date).format('dddd, MMMM Do YYYY');
+  // Extract YYYY-MM-DD from RAW_DATE_STR:YYYY-MM-DD
+  const dateString = booking.date && booking.date.startsWith('RAW_DATE_STR:') 
+                   ? booking.date.substring(13) 
+                   : booking.date; // Fallback if prefix is missing
+
+  const formattedDate = moment(dateString).format('dddd, MMMM Do YYYY');
   const formattedTime = moment(booking.time, 'HH:mm').format('h:mm A');
 
   const mailOptions = {
@@ -147,7 +152,12 @@ const sendBookingCancellationEmail = async (user, booking, restaurant, retries =
     return;
   }
 
-  const formattedDate = moment(booking.date).format('dddd, MMMM Do YYYY');
+  // Extract YYYY-MM-DD from RAW_DATE_STR:YYYY-MM-DD
+  const dateStringCancellation = booking.date && booking.date.startsWith('RAW_DATE_STR:')
+                               ? booking.date.substring(13)
+                               : booking.date; // Fallback
+
+  const formattedDate = moment(dateStringCancellation).format('dddd, MMMM Do YYYY');
   const formattedTime = moment(booking.time, 'HH:mm').format('h:mm A');
 
   const mailOptions = {

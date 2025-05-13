@@ -270,9 +270,14 @@ exports.cancelBooking = async (req, res) => {
     try {
       if (populatedBooking && populatedBooking.userId && populatedBooking.restaurantId) {
         console.log('Creating cancellation notification');
+        // Extract YYYY-MM-DD from RAW_DATE_STR:YYYY-MM-DD for notification
+        const notificationDateString = populatedBooking.date && populatedBooking.date.startsWith('RAW_DATE_STR:')
+                                     ? populatedBooking.date.substring(13)
+                                     : populatedBooking.date; // Fallback
+
         await Notification.create({
           userId: populatedBooking.userId._id,
-          message: `Your booking at ${populatedBooking.restaurantId.name} for ${moment(populatedBooking.date).format('MMMM Do YYYY')} at ${populatedBooking.time} has been cancelled.`,
+          message: `Your booking at ${populatedBooking.restaurantId.name} for ${moment(notificationDateString).format('MMMM Do YYYY')} at ${populatedBooking.time} has been cancelled.`,
           type: 'booking_cancelled',
           bookingId: populatedBooking._id
         });
