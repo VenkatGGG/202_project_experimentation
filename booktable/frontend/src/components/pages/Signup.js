@@ -33,7 +33,7 @@ const Signup = () => {
 
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { isAuthenticated, error, loading } = useSelector((state) => state.auth);
+  const { isAuthenticated, error, loading, user } = useSelector((state) => state.auth);
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -49,13 +49,19 @@ const Signup = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate('/dashboard'); 
+    if (isAuthenticated && user) {
+      if (user.role === 'manager') {
+        navigate('/manager/dashboard');
+      } else if (user.role === 'admin') {
+        navigate('/admin/dashboard'); 
+      } else {
+        navigate('/dashboard'); 
+      }
     }
     return () => {
       dispatch(clearError());
     };
-  }, [isAuthenticated, navigate, dispatch]); 
+  }, [isAuthenticated, user, navigate, dispatch]); 
 
   const handleChange = (e) => {
     const { name, value } = e.target;

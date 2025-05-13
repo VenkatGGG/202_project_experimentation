@@ -93,26 +93,86 @@ const UserDashboard = () => {
   };
 
   const filterBookings = () => {
+    // Get current date and time
     const now = moment();
-    console.log('UserDashboard - filterBookings - now:', now.toString());
+    console.log('UserDashboard - Current time:', now.format('YYYY-MM-DD HH:mm:ss'));
+    
     return userBookings.filter((booking) => {
-      console.log('UserDashboard - filterBookings - booking.date:', booking.date, 'booking.time:', booking.time, 'status:', booking.status);
+      // Parse the time string (e.g., "19:00")
       const [hours, minutes] = booking.time.split(':').map(Number);
-      const bookingDateMoment = moment.utc(booking.date); // Parse the UTC date string
-      const bookingDateTime = bookingDateMoment.local()    // Convert to local timezone
-                                         .hour(hours)     // Set hours in local time
-                                         .minute(minutes) // Set minutes in local time
-                                         .second(0)
-                                         .millisecond(0);
-
-      console.log('UserDashboard - filterBookings - constructed bookingDateTime:', bookingDateTime.toString(), 'isValid:', bookingDateTime.isValid());
-      console.log('UserDashboard - filterBookings - isAfterNow:', bookingDateTime.isAfter(now));
+      
+      // Create a reliable date/time object from the booking data
+      let bookingDateTime;
+      
+      try {
+        // Extract the date part based on the format
+        let dateStr;
+        const datePrefix = "RAW_DATE_STR:";
+        
+        // Check for our new prefixed format: "RAW_DATE_STR:YYYY-MM-DD"
+        if (typeof booking.date === 'string' && booking.date.startsWith(datePrefix)) {
+          dateStr = booking.date.substring(datePrefix.length);
+          console.log('Extracted date from RAW_DATE_STR format:', dateStr);
+        }
+        // Check for our special format: "YYYY-MM-DD (Day)"
+        else if (typeof booking.date === 'string' && booking.date.match(/^\d{4}-\d{2}-\d{2}\s+\([A-Za-z]+\)$/)) {
+          // Extract just the date part before the day name
+          dateStr = booking.date.split(' ')[0];
+          console.log('Extracted date from special format:', dateStr);
+        } 
+        // Check if it's already in YYYY-MM-DD format
+        else if (typeof booking.date === 'string' && booking.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+          dateStr = booking.date;
+          console.log('Using YYYY-MM-DD format directly:', dateStr);
+        }
+        // For ISO date strings or Date objects
+        else {
+          const dateObj = new Date(booking.date);
+          if (!isNaN(dateObj.getTime())) {
+            dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+            console.log('Extracted date from Date object:', dateStr);
+          } else {
+            // Last resort - try to use the string directly
+            dateStr = booking.date;
+            console.log('Using date string directly:', dateStr);
+          }
+        }
+        
+        // Create a moment object with the extracted date and booking time
+        bookingDateTime = moment(`${dateStr} ${hours}:${minutes}:00`, 'YYYY-MM-DD HH:mm:ss');
+        
+        // Validate the created datetime
+        if (!bookingDateTime.isValid()) {
+          throw new Error('Invalid datetime created');
+        }
+        
+        console.log('Final booking datetime:', bookingDateTime.format('YYYY-MM-DD HH:mm:ss'));
+      } catch (e) {
+        console.error('Error creating booking datetime:', e);
+        // Fallback to current time (this booking will show in past tab)
+        bookingDateTime = moment();
+      }
+      
+      // Debug logging
+      console.log(`Booking at ${booking.restaurantName}:`);
+      console.log(`- Raw date from server: ${booking.date}, Time: ${hours}:${minutes}`);
+      console.log(`- Full DateTime: ${bookingDateTime.format('YYYY-MM-DD HH:mm:ss')}`);
+      console.log(`- Is after now: ${bookingDateTime.isAfter(now)}`);
+      console.log(`- Status: ${booking.status}`);
+      console.log(`- Tab value: ${tabValue}`);
+      
+      // For upcoming tab (tabValue === 0)
       if (tabValue === 0) {
-        // Upcoming bookings
-        return bookingDateTime.isAfter(now) && booking.status !== 'cancelled';
+        // Check if the booking is in the future AND not cancelled
+        const isUpcoming = bookingDateTime.isAfter(now) && booking.status !== 'cancelled';
+        console.log(`- Should show in Upcoming tab: ${isUpcoming}`);
+        return isUpcoming;
       } else {
-        // Past bookings and cancelled
-        return bookingDateTime.isBefore(now) || booking.status === 'cancelled';
+        // For past & cancelled tab (tabValue === 1)
+        // Check if the booking is in the past OR cancelled
+        const isPastOrCancelled = bookingDateTime.isBefore(now) || booking.status === 'cancelled';
+        console.log(`- Should show in Past & Cancelled tab: ${isPastOrCancelled}`);
+        return isPastOrCancelled;
       }
     });
   };
@@ -348,7 +408,61 @@ const UserDashboard = () => {
                           <Stack direction="row" spacing={1} alignItems="center">
                             <CalendarTodayIcon sx={{ color: '#2196f3', fontSize: 20 }} />
                             <Typography variant="body1">
-                              {moment(booking.date).format('MMMM D, YYYY')}
+                              {(() => {
+                                try {
+                                  let displayDateStr = booking.date;
+                                  const datePrefix = "RAW_DATE_STR:";
+                                  
+                                  // Check for our new prefixed format: "RAW_DATE_STR:YYYY-MM-DD"
+                                  if (typeof booking.date === 'string' && booking.date.startsWith(datePrefix)) {
+                                    displayDateStr = booking.date.substring(datePrefix.length);
+                                    console.log('Displaying date from RAW_DATE_STR format:', displayDateStr);
+                                  }
+
+                                  // Check for our special format: "YYYY-MM-DD (Day)"
+                                  if (typeof displayDateStr === 'string' && displayDateStr.match(/^\d{4}-\d{2}-\d{2}\s+\([A-Za-z]+\)$/)) {
+                                    // Extract just the date part before the day name
+                                    const datePart = displayDateStr.split(' ')[0];
+                                    const [year, month, day] = datePart.split('-').map(Number);
+                                    return new Date(year, month - 1, day).toLocaleDateString('en-US', { 
+                                      year: 'numeric', month: 'long', day: 'numeric' 
+                                    });
+                                  }
+                                  
+                                  // Check if the date is in YYYY-MM-DD format (after potential prefix removal)
+                                  if (typeof displayDateStr === 'string' && displayDateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                                    // Parse the YYYY-MM-DD format directly
+                                    const [year, month, day] = displayDateStr.split('-').map(Number);
+                                    return new Date(year, month - 1, day).toLocaleDateString('en-US', { 
+                                      year: 'numeric', month: 'long', day: 'numeric' 
+                                    });
+                                  }
+                                  
+                                  // Handle the case where date is a full date string with time
+                                  if (typeof booking.date === 'string' && booking.date.includes('May')) {
+                                    // Extract just the date part from strings like "Mon May 13 2025..."
+                                    const match = booking.date.match(/([A-Za-z]+)\s+([A-Za-z]+)\s+(\d+)\s+(\d{4})/);
+                                    if (match) {
+                                      const [_, dayOfWeek, month, day, year] = match;
+                                      return `${month} ${day}, ${year}`;
+                                    }
+                                  }
+                                  
+                                  // Fallback to standard date parsing
+                                  const dateObj = new Date(booking.date);
+                                  if (!isNaN(dateObj.getTime())) {
+                                    return dateObj.toLocaleDateString('en-US', { 
+                                      year: 'numeric', month: 'long', day: 'numeric' 
+                                    });
+                                  }
+                                  
+                                  // Last resort
+                                  return moment(booking.date).format('MMMM D, YYYY');
+                                } catch (e) {
+                                  console.error('Error formatting date:', e);
+                                  return 'Date unavailable';
+                                }
+                              })()}
                             </Typography>
                           </Stack>
                           <Stack direction="row" spacing={1} alignItems="center">

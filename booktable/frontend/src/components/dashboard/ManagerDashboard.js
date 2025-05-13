@@ -122,14 +122,13 @@ const ManagerDashboard = () => {
       street: '',
       city: '',
       state: '',
-      zipCode: '',
+      zipCode: ''
     },
     cuisineType: '',
-    description: '',
+    description: ''
   });
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState(null); // State for the photo file
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
@@ -297,13 +296,7 @@ const ManagerDashboard = () => {
     }
   };
 
-  const handleCloseDialog = () => {
-    setDialogOpen(false);
-    setIsEditing(false);
-    setSelectedRestaurant(null);
-    setSelectedPhoto(null); // Reset selected photo on dialog close
-    setFormData(initialFormData);
-  };
+  // We're now using the RestaurantForm component for both adding and editing restaurants
 
   if (restaurantLoading && !managerRestaurants.length) {
     return (
@@ -372,11 +365,7 @@ const ManagerDashboard = () => {
           <Box sx={{ mb: 4, display: 'flex', justifyContent: 'flex-end' }}>
         <Button
           variant="contained"
-              onClick={() => {
-                setSelectedRestaurant(null);
-                setFormData(initialFormData);
-                setDialogOpen(true);
-              }}
+              onClick={() => handleOpenRestaurantForm(null)}
               sx={{
                 background: `linear-gradient(135deg, 
                   ${colors.secondary.main}, 
@@ -718,329 +707,6 @@ const ManagerDashboard = () => {
       </Container>
 
       <Dialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{
-          sx: {
-            borderRadius: '16px',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)',
-          }
-        }}
-      >
-        <DialogTitle sx={{ 
-          pb: 1,
-          fontWeight: 600,
-          fontSize: '1.25rem',
-        }}>
-          {selectedRestaurant ? 'Edit Restaurant' : 'Add New Restaurant'}
-        </DialogTitle>
-        <DialogContent sx={{ pb: 2 }}>
-          <Box component="form" onSubmit={(e) => {
-            e.preventDefault();
-            // Create FormData from the form inputs
-            const data = new FormData();
-            data.append('name', formData.name);
-            data.append('description', formData.description);
-            data.append('cuisineType', formData.cuisineType);
-            // Address fields
-            data.append('address[street]', formData.address.street);
-            data.append('address[city]', formData.address.city);
-            data.append('address[state]', formData.address.state);
-            data.append('address[zipCode]', formData.address.zipCode);
-
-            // Append the photo if one is selected
-            if (selectedPhoto) {
-              data.append('photo', selectedPhoto);
-            }
-            
-            // Call the restaurant form submit handler
-            handleRestaurantFormSubmit(data);
-          }} sx={{ mt: 2 }}>
-            <TextField
-              fullWidth
-              label="Restaurant Name"
-              name="name"
-              value={formData.name}
-              onChange={handleInputChange}
-              margin="normal"
-              required
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: '12px',
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: alpha(colors.primary.main, 0.5),
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: colors.primary.main,
-                    borderWidth: 2,
-                  },
-                },
-                '& .MuiInputLabel-root': {
-                  color: colors.text.secondary,
-                  '&.Mui-focused': {
-                    color: colors.primary.main,
-                  },
-                },
-              }}
-            />
-            <TextField
-              fullWidth
-              label="Street Address"
-              name="address.street"
-              value={formData.address.street}
-              onChange={handleInputChange}
-              margin="normal"
-              required
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: '12px',
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: alpha(colors.primary.main, 0.5),
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: colors.primary.main,
-                    borderWidth: 2,
-                  },
-                },
-                '& .MuiInputLabel-root': {
-                  color: colors.text.secondary,
-                  '&.Mui-focused': {
-                    color: colors.primary.main,
-                  },
-                },
-              }}
-            />
-            <Grid container spacing={2} sx={{ mt: 0 }}>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="City"
-                  name="address.city"
-                  value={formData.address.city}
-                  onChange={handleInputChange}
-                  margin="normal"
-                  required
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: '12px',
-                      '&:hover .MuiOutlinedInput-notchedOutline': {
-                        borderColor: alpha(colors.primary.main, 0.5),
-                      },
-                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                        borderColor: colors.primary.main,
-                        borderWidth: 2,
-                      },
-                    },
-                    '& .MuiInputLabel-root': {
-                      color: colors.text.secondary,
-                      '&.Mui-focused': {
-                        color: colors.primary.main,
-                      },
-                    },
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="State"
-                  name="address.state"
-                  value={formData.address.state}
-                  onChange={handleInputChange}
-                  margin="normal"
-                  required
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: '12px',
-                      '&:hover .MuiOutlinedInput-notchedOutline': {
-                        borderColor: alpha(colors.primary.main, 0.5),
-                      },
-                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                        borderColor: colors.primary.main,
-                        borderWidth: 2,
-                      },
-                    },
-                    '& .MuiInputLabel-root': {
-                      color: colors.text.secondary,
-                      '&.Mui-focused': {
-                        color: colors.primary.main,
-                      },
-                    },
-                  }}
-                />
-              </Grid>
-            </Grid>
-            <TextField
-              fullWidth
-              label="ZIP Code"
-              name="address.zipCode"
-              value={formData.address.zipCode}
-              onChange={handleInputChange}
-              margin="normal"
-              required
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: '12px',
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: alpha(colors.primary.main, 0.5),
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: colors.primary.main,
-                    borderWidth: 2,
-                  },
-                },
-                '& .MuiInputLabel-root': {
-                  color: colors.text.secondary,
-                  '&.Mui-focused': {
-                    color: colors.primary.main,
-                  },
-                },
-              }}
-            />
-            <TextField
-              fullWidth
-              select
-              label="Cuisine Type"
-              name="cuisineType"
-              value={formData.cuisineType}
-              onChange={handleInputChange}
-              margin="normal"
-              required
-              SelectProps={{
-                renderValue: (selected) => selected,
-              }}
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: '12px',
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: alpha(colors.primary.main, 0.5),
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: colors.primary.main,
-                    borderWidth: 2,
-                  },
-                },
-                '& .MuiInputLabel-root': {
-                  color: colors.text.secondary,
-                  '&.Mui-focused': {
-                    color: colors.primary.main,
-                  },
-                },
-              }}
-            >
-              {cuisineOptions.map((option) => (
-                <MenuItem key={option} value={option}>
-                  {option}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              fullWidth
-              label="Description"
-              name="description"
-              value={formData.description}
-              onChange={handleInputChange}
-              margin="normal"
-              multiline
-              rows={4}
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: '12px',
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: alpha(colors.primary.main, 0.5),
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: colors.primary.main,
-                    borderWidth: 2,
-                  },
-                },
-                '& .MuiInputLabel-root': {
-                  color: colors.text.secondary,
-                  '&.Mui-focused': {
-                    color: colors.primary.main,
-                  },
-                },
-              }}
-            />
-
-            {/* Photo Upload Field - only for adding new, or if editing supports photo change */} 
-            {(!isEditing || true) && ( // Show always for now, can restrict to !isEditing if edit photo is complex
-              <Box sx={{ mt: 2, mb: 1 }}>
-                <Typography variant="subtitle1" sx={{ color: colors.text.primary, mb: 1}}>
-                  Restaurant Photo
-                </Typography>
-                <Button
-                  variant="contained"
-                  component="label"
-                  sx={{
-                    backgroundColor: colors.primary.main,
-                    '&:hover': {
-                      backgroundColor: alpha(colors.primary.main, 0.8),
-                    },
-                    color: colors.background.default, 
-                    textTransform: 'none',
-                    padding: '10px 15px',
-                    borderRadius: '8px',
-                  }}
-                >
-                  Upload Photo
-                  <input
-                    type="file"
-                    hidden
-                    accept="image/*"
-                    onChange={handlePhotoChange}
-                  />
-                </Button>
-                {selectedPhoto && (
-                  <Typography variant="body2" sx={{ mt: 1, color: colors.text.secondary }}>
-                    Selected: {selectedPhoto.name}
-                  </Typography>
-                )}
-              </Box>
-            )}
-
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ padding: '16px 24px', borderTop: `1px solid ${colors.divider}`}}>
-          <Button 
-            onClick={() => setDialogOpen(false)}
-            sx={{ 
-              textTransform: 'none',
-              px: 2,
-              py: 1,
-              borderRadius: '8px',
-              color: colors.text.secondary,
-              '&:hover': {
-                backgroundColor: alpha(colors.text.secondary, 0.08),
-              },
-            }}
-          >
-            Cancel
-          </Button>
-          <Button 
-            type="submit"
-            variant="contained"
-            sx={{ 
-              textTransform: 'none',
-              px: 2,
-              py: 1,
-              borderRadius: '8px',
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
-              '&:hover': {
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
-                transform: 'translateY(-1px)',
-              },
-              transition: 'all 0.2s ease',
-            }}
-          >
-            {selectedRestaurant ? 'Update Restaurant' : 'Add Restaurant'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
         open={confirmDialogOpen}
         onClose={() => setConfirmDialogOpen(false)}
         PaperProps={{
@@ -1127,15 +793,23 @@ const ManagerDashboard = () => {
           {isEditing ? 'Edit Restaurant' : 'Add New Restaurant'}
         </DialogTitle>
         <DialogContent>
-          {currentRestaurant && (
+          {(isEditing && currentRestaurant) || !isEditing ? (
             <RestaurantForm
-              key={currentRestaurant._id} // Add a key to force re-render when restaurant changes
-              initialData={currentRestaurant}
+              key={isEditing && currentRestaurant ? currentRestaurant._id : 'new-restaurant-form'}
+              initialData={isEditing && currentRestaurant ? currentRestaurant : initialFormData}
               onSubmit={handleRestaurantFormSubmit}
               loading={restaurantLoading}
-              error={restaurantError}
+              error={restaurantError} 
+              onCancel={handleCloseRestaurantForm}
+              isEditing={isEditing}
+              cuisineOptions={cuisineOptions}
+              predefinedRestaurantImages={predefinedRestaurantImages}
             />
-          )}
+          ) : restaurantLoading ? ( // Show loading indicator if fetching for edit and currentRestaurant not yet available
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+              <CircularProgress />
+            </Box>
+          ) : null}
         </DialogContent>
         <DialogActions sx={{ padding: '16px 24px', borderTop: `1px solid ${colors.divider}`}}>
           <Button 

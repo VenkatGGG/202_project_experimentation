@@ -16,7 +16,7 @@ const bookingSchema = new mongoose.Schema({
     // No 'ref' needed here as it's an ID of a subdocument, not a separate collection model
   },
   date: {
-    type: Date,
+    type: String, // Changed from Date to String to prevent timezone conversions
     required: true
   },
   time: {

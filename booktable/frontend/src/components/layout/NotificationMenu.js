@@ -30,13 +30,22 @@ const NotificationMenu = ({ anchorEl, open, onClose }) => {
   const dispatch = useDispatch();
   const { items, unreadCount, loading, error } = useSelector((state) => state.notifications);
 
+  // Use a ref to track if we've already fetched notifications
+  const [hasFetched, setHasFetched] = React.useState(false);
+
   useEffect(() => {
-    // Fetch notifications when the menu is opened, if not already loading and items are not fresh
-    // Or consider fetching when Navbar mounts and isAuthenticated
-    if (open && !loading) {
+    // Only fetch notifications when the menu is opened AND we haven't fetched yet
+    // This prevents the infinite loop of fetching
+    if (open && !loading && !hasFetched) {
       dispatch(fetchUserNotifications());
+      setHasFetched(true); // Mark as fetched to prevent continuous fetching
     }
-  }, [open, dispatch, loading]);
+    
+    // Reset the hasFetched flag when the menu is closed
+    if (!open) {
+      setHasFetched(false);
+    }
+  }, [open, dispatch, loading, hasFetched]);
 
   const handleMarkAsRead = (notificationId) => {
     dispatch(markNotificationAsRead(notificationId));

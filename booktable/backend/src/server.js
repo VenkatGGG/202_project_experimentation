@@ -45,13 +45,24 @@ console.log('Logging initialized. Output will be directed to backend.log');
 const app = express();
 
 // Middleware
-// Place CORS middleware before express.json()
+// Place CORS middleware before body parsers
 app.use(cors({
   origin: 'http://localhost:3000',
   credentials: true,
   optionsSuccessStatus: 200 // Handles OPTIONS preflight and is good for legacy browsers
 }));
-app.use(express.json());
+
+// Body parsing middleware
+app.use(express.json()); // For parsing application/json
+app.use(express.urlencoded({ extended: true })); // For parsing application/x-www-form-urlencoded
+
+// Debug middleware to log request bodies
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  console.log('Request headers:', req.headers);
+  console.log('Request body:', req.body);
+  next();
+});
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)

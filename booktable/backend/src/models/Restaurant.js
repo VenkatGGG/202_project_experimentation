@@ -35,7 +35,7 @@ const restaurantSchema = new mongoose.Schema({
   // Available tables for specific dates
   availableTables: [{
     date: {
-      type: Date,
+      type: String,
       required: true
     },
     tables: [{
