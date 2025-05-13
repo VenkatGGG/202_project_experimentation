@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import axios from 'axios';
+import api from '../api';
 
 const initialState = {
   bookingStats: [],
@@ -10,15 +10,9 @@ const initialState = {
 // Async thunk to fetch booking analytics
 export const fetchBookingAnalytics = createAsyncThunk(
   'analytics/fetchBookingAnalytics',
-  async (_, { getState, rejectWithValue }) => {
+  async (_, { rejectWithValue }) => {
     try {
-      const { token } = getState().auth.user; // Assuming user object with token is in auth slice
-      const config = {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      };
-      const response = await axios.get('/api/bookings/analytics', config); 
+      const response = await api.get('/bookings/analytics');
       return response.data;
     } catch (err) {
       return rejectWithValue(err.response ? err.response.data : err.message);
@@ -29,7 +23,11 @@ export const fetchBookingAnalytics = createAsyncThunk(
 const analyticsSlice = createSlice({
   name: 'analytics',
   initialState,
-  reducers: {},
+  reducers: {
+    clearError: (state) => {
+      state.error = null;
+    }
+  },
   extraReducers: (builder) => {
     builder
       .addCase(fetchBookingAnalytics.pending, (state) => {
@@ -39,12 +37,15 @@ const analyticsSlice = createSlice({
       .addCase(fetchBookingAnalytics.fulfilled, (state, action) => {
         state.status = 'succeeded';
         state.bookingStats = action.payload;
+        state.error = null;
       })
       .addCase(fetchBookingAnalytics.rejected, (state, action) => {
         state.status = 'failed';
-        state.error = action.payload?.error || action.payload || 'Failed to fetch booking analytics';
+        state.error = action.payload || 'Failed to fetch analytics';
       });
-  },
+  }
 });
+
+export const { clearError } = analyticsSlice.actions;
 
 export default analyticsSlice.reducer;

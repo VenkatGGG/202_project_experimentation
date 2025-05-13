@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import {
   Container, Typography, Paper, Table, TableBody, TableCell, 
   TableContainer, TableHead, TableRow, Button, CircularProgress, 
@@ -18,6 +19,7 @@ import { colors } from '../../theme/designSystem';
 
 const AdminDashboard = () => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { 
     restaurants, 
     loading: restaurantsLoading, 
@@ -51,6 +53,10 @@ const AdminDashboard = () => {
     }
     setConfirmDialogOpen(false);
     setActionToConfirm(null);
+  };
+
+  const handleViewAnalytics = () => {
+    navigate('/admin/analytics');
   };
 
   if (restaurantsLoading && restaurants.length === 0) {
@@ -119,9 +125,8 @@ const AdminDashboard = () => {
 
           <Box sx={{ mb: 4, display: 'flex', justifyContent: 'flex-end' }}>
             <Button 
-              component={RouterLink} 
-              to="/admin/analytics" 
               variant="contained" 
+              onClick={handleViewAnalytics}
               sx={{
                 background: `linear-gradient(135deg, 
                   ${colors.secondary.main}, 
