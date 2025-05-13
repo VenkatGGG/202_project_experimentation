@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Box, Typography, Paper, CircularProgress, Alert } from '@mui/material';
+import { Box, Typography, Paper, CircularProgress, Alert, Container } from '@mui/material';
 import { Bar, Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -115,22 +115,52 @@ const AnalyticsDashboard = () => {
   });
 
   return (
-    <Paper sx={{ p: 3, mt: 3, mx: 'auto', maxWidth: '1000px' }}>
-      <Typography variant="h4" gutterBottom align="center">Admin Analytics Dashboard</Typography>
-      {bookingStats.length === 0 && status === 'succeeded' && (
-        <Alert severity="info" sx={{ mt: 2 }}>No booking data available for the last month.</Alert>
-      )}
-      {bookingStats.length > 0 && (
-        <Box>
-          <Box sx={{ height: '400px', mb: 5, mt:3 }}>
-            <Bar options={chartOptions('Total Bookings')} data={totalBookingsData} />
+    <Container 
+      maxWidth="lg" 
+      sx={{ 
+        mt: { xs: 10, sm: 12, md: 14 },
+        mb: 4,
+        pt: 2,
+        minHeight: '100vh',
+        position: 'relative',
+        zIndex: 1,
+      }}
+    >
+      <Paper 
+        sx={{ 
+          p: 3, 
+          borderRadius: '16px',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.08)',
+          border: '1px solid rgba(0, 0, 0, 0.06)',
+        }}
+      >
+        <Typography 
+          variant="h4" 
+          gutterBottom 
+          align="center"
+          sx={{
+            fontWeight: 700,
+            mb: 4,
+            color: 'text.primary',
+          }}
+        >
+          Admin Analytics Dashboard
+        </Typography>
+        {bookingStats.length === 0 && status === 'succeeded' && (
+          <Alert severity="info" sx={{ mt: 2 }}>No booking data available for the last month.</Alert>
+        )}
+        {bookingStats.length > 0 && (
+          <Box>
+            <Box sx={{ height: '400px', mb: 5 }}>
+              <Bar options={chartOptions('Total Bookings')} data={totalBookingsData} />
+            </Box>
+            <Box sx={{ height: '400px' }}>
+              <Line options={chartOptions('Average Party Size')} data={averagePartySizeData} />
+            </Box>
           </Box>
-          <Box sx={{ height: '400px' }}>
-            <Line options={chartOptions('Average Party Size')} data={averagePartySizeData} />
-          </Box>
-        </Box>
-      )}
-    </Paper>
+        )}
+      </Paper>
+    </Container>
   );
 };
 
