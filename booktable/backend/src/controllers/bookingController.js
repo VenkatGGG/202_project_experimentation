@@ -2,15 +2,17 @@ const Booking = require('../models/Booking');
 const Restaurant = require('../models/Restaurant');
 const moment = require('moment');
 const User = require('../models/User'); 
-const { sendBookingConfirmationEmail } = require('../utils/emailService'); 
+const { sendBookingConfirmationEmail, sendBookingCancellationEmail } = require('../utils/emailService'); 
 const Notification = require('../models/Notification'); 
 
 exports.createBooking = async (req, res) => {
   try {
+    console.log('Creating booking with data:', req.body);
     const { restaurantId, date, time, partySize } = req.body;
     const userId = req.user._id;
 
     if (!restaurantId || !date || !time || !partySize) {
+      console.log('Missing required booking information:', { restaurantId, date, time, partySize });
       return res.status(400).json({ error: 'Missing required booking information.' });
     }
     const numericPartySize = parseInt(partySize, 10);
@@ -46,12 +48,14 @@ exports.createBooking = async (req, res) => {
       date: moment(date).utc().startOf('day').toDate(),
       time,
       partySize: numericPartySize,
-      tableSize: suitableTable.tableSize, // Keep this for quick reference if needed
-      bookedTableDefinitionId: suitableTable._id, // Store the specific table definition ID
+      tableSize: suitableTable.tableSize,
+      bookedTableDefinitionId: suitableTable._id,
       status: 'confirmed'
     });
 
+    console.log('Saving new booking:', booking);
     await booking.save();
+    console.log('Booking saved successfully');
 
     suitableTable.availableTimes = suitableTable.availableTimes.filter(t => t !== time);
     restaurant.markModified('availableTables'); 
@@ -61,23 +65,41 @@ exports.createBooking = async (req, res) => {
       $inc: { timesBookedToday: 1 }
     });
 
+    console.log('Fetching populated booking details for email');
     const populatedBooking = await Booking.findById(booking._id)
-                                        .populate('userId', 'firstName lastName email')
-                                        .populate('restaurantId', 'name address');
+                                      .populate('userId', 'firstName lastName email')
+                                      .populate('restaurantId', 'name address');
 
-    // Send booking confirmation email (fire and forget, or await if critical and handle errors)
+    console.log('Populated booking details:', {
+      hasUser: !!populatedBooking?.userId,
+      hasRestaurant: !!populatedBooking?.restaurantId,
+      userEmail: populatedBooking?.userId?.email,
+      restaurantName: populatedBooking?.restaurantId?.name
+    });
+
+    // Send booking confirmation email
     if (populatedBooking && populatedBooking.userId && populatedBooking.restaurantId) {
+      console.log('Attempting to send confirmation email to:', populatedBooking.userId.email);
       try {
-        await sendBookingConfirmationEmail(
-          populatedBooking.userId,      // User object (populated with email, firstName)
-          populatedBooking,           // Booking object (has date, time, partySize)
-          populatedBooking.restaurantId // Restaurant object (populated with name)
+        const emailResult = await sendBookingConfirmationEmail(
+          populatedBooking.userId,
+          populatedBooking,
+          populatedBooking.restaurantId
         );
+        console.log('Email sent successfully:', emailResult);
       } catch (emailError) {
-        console.error('Failed to send booking confirmation email:', emailError);
-        // Do not block the response to the user due to email failure
-        // Log this error for monitoring
+        console.error('Failed to send booking confirmation email. Error details:', {
+          message: emailError.message,
+          code: emailError.code,
+          stack: emailError.stack
+        });
       }
+    } else {
+      console.error('Cannot send email - missing required data:', {
+        hasBooking: !!populatedBooking,
+        hasUser: !!populatedBooking?.userId,
+        hasRestaurant: !!populatedBooking?.restaurantId
+      });
     }
     
     // Create a notification for successful booking
@@ -96,7 +118,7 @@ exports.createBooking = async (req, res) => {
     res.status(201).json(populatedBooking);
 
   } catch (error) {
-    console.error('Error creating booking:', error); 
+    console.error('Error creating booking:', error);
     res.status(500).json({ error: 'Error creating booking' });
   }
 };
@@ -125,101 +147,129 @@ exports.getRestaurantBookings = async (req, res) => {
 
 exports.cancelBooking = async (req, res) => {
   try {
-    const booking = await Booking.findOne({
-      _id: req.params.id,
-      userId: req.user._id,
-      status: { $ne: 'cancelled' }
+    console.log('Attempting to cancel booking:', req.params.id);
+    const booking = await Booking.findById(req.params.id);
+    
+    if (!booking) {
+      console.log('Booking not found:', req.params.id);
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    console.log('Found booking:', {
+      id: booking._id,
+      userId: booking.userId,
+      status: booking.status,
+      date: booking.date,
+      time: booking.time
     });
 
-    if (!booking) {
-      return res.status(404).json({ error: 'Booking not found or already cancelled' });
+    // Check if the user is authorized to cancel this booking
+    if (booking.userId.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      console.log('Unauthorized cancellation attempt:', {
+        bookingUserId: booking.userId.toString(),
+        requestUserId: req.user._id.toString(),
+        userRole: req.user.role
+      });
+      return res.status(403).json({ error: 'Not authorized to cancel this booking' });
     }
 
+    // Check if the booking is already cancelled
+    if (booking.status === 'cancelled') {
+      console.log('Booking already cancelled:', booking._id);
+      return res.status(400).json({ error: 'Booking is already cancelled' });
+    }
+
+    // Update booking status
+    console.log('Updating booking status to cancelled');
     booking.status = 'cancelled';
     await booking.save();
+    console.log('Booking status updated successfully');
 
+    // Update restaurant's available tables
+    console.log('Updating restaurant tables for booking:', booking.restaurantId);
     const restaurant = await Restaurant.findById(booking.restaurantId);
-    if (!restaurant) {
-      console.error(`Restaurant not found (ID: ${booking.restaurantId}) during cancellation of booking ${booking._id}`);
-      // Not returning error to user, as booking is already cancelled. Log for admin.
-      return res.json(booking); // Return the cancelled booking
-    }
+    if (restaurant) {
+      const dateStr = moment(booking.date).format('YYYY-MM-DD');
+      const availabilityForDate = restaurant.availableTables.find(entry => 
+        moment(entry.date).format('YYYY-MM-DD') === dateStr
+      );
 
-    // Find the availability entry for the specific date of the booking
-    const availabilityEntryForDate = restaurant.availableTables.find(entry => 
-      moment(entry.date).utc().isSame(moment(booking.date).utc(), 'day')
-    );
-
-    if (availabilityEntryForDate) {
-      let specificTableDefinition;
-      if (booking.bookedTableDefinitionId) {
-        // NEW LOGIC: Find the exact table definition using the stored ID
-        specificTableDefinition = availabilityEntryForDate.tables.find(
-          table => table._id.equals(booking.bookedTableDefinitionId)
-        );
-      } else {
-        // FALLBACK for older bookings: Find by tableSize (previous logic)
-        console.warn(`Booking ${booking._id} does not have bookedTableDefinitionId. Falling back to tableSize match for cancellation.`);
-        specificTableDefinition = availabilityEntryForDate.tables.find(
-          table => table.tableSize === booking.tableSize && table.availableTimes.indexOf(booking.time) === -1 // Ensure time was actually booked on *a* table of this size
-        );
-      }
-
-      if (specificTableDefinition) {
-        // Add the time slot back to this specific table's availableTimes
-        // if it's not already there (to prevent duplicates if somehow cancelled twice)
-        if (!specificTableDefinition.availableTimes.includes(booking.time)) {
-          specificTableDefinition.availableTimes.push(booking.time);
-          // Sort HH:mm times correctly
-          specificTableDefinition.availableTimes.sort((a, b) => {
-            return moment(a, 'HH:mm').diff(moment(b, 'HH:mm'));
-          });
-          restaurant.markModified('availableTables'); // IMPORTANT for nested arrays
+      if (availabilityForDate) {
+        const table = availabilityForDate.tables.find(t => t._id.toString() === booking.bookedTableDefinitionId.toString());
+        if (table) {
+          console.log('Adding back time slot to table:', booking.time);
+          table.availableTimes.push(booking.time);
+          restaurant.markModified('availableTables');
           await restaurant.save();
+          console.log('Restaurant tables updated successfully');
+        } else {
+          console.log('Table not found in availability:', booking.bookedTableDefinitionId);
         }
       } else {
-        // This indicates a potential data inconsistency
-        if (booking.bookedTableDefinitionId) {
-          console.error(`Consistency Error: Booked table definition ID ${booking.bookedTableDefinitionId} (size ${booking.tableSize}) not found for date ${moment(booking.date).utc().format('YYYY-MM-DD')} in restaurant ${restaurant._id} during cancellation of booking ${booking._id}`);
-        } else {
-          console.error(`Consistency Error: No table of size ${booking.tableSize} found (or time ${booking.time} not booked on it) for date ${moment(booking.date).utc().format('YYYY-MM-DD')} in restaurant ${restaurant._id} during cancellation of booking ${booking._id} (fallback).`);
-        }
+        console.log('No availability found for date:', dateStr);
       }
     } else {
-      // This also indicates a potential data inconsistency
-      console.error(`Consistency Error: No availability entry found for date ${moment(booking.date).utc().format('YYYY-MM-DD')} in restaurant ${restaurant._id} during cancellation of booking ${booking._id}`);
+      console.log('Restaurant not found:', booking.restaurantId);
+    }
+
+    // Get populated booking details for email and notification
+    console.log('Fetching populated booking details for cancellation email');
+    const populatedBooking = await Booking.findById(booking._id)
+                                      .populate('userId', 'firstName lastName email')
+                                      .populate('restaurantId', 'name address');
+
+    console.log('Populated booking details:', {
+      hasUser: !!populatedBooking?.userId,
+      hasRestaurant: !!populatedBooking?.restaurantId,
+      userEmail: populatedBooking?.userId?.email,
+      restaurantName: populatedBooking?.restaurantId?.name
+    });
+
+    // Send cancellation email
+    if (populatedBooking && populatedBooking.userId && populatedBooking.restaurantId) {
+      console.log('Attempting to send cancellation email to:', populatedBooking.userId.email);
+      try {
+        const emailResult = await sendBookingCancellationEmail(
+          populatedBooking.userId,
+          populatedBooking,
+          populatedBooking.restaurantId
+        );
+        console.log('Cancellation email sent successfully:', emailResult);
+      } catch (emailError) {
+        console.error('Failed to send booking cancellation email. Error details:', {
+          message: emailError.message,
+          code: emailError.code,
+          stack: emailError.stack
+        });
+      }
+    } else {
+      console.error('Cannot send cancellation email - missing required data:', {
+        hasBooking: !!populatedBooking,
+        hasUser: !!populatedBooking?.userId,
+        hasRestaurant: !!populatedBooking?.restaurantId
+      });
     }
 
     // Create a notification for successful cancellation
     try {
-      const cancelledBooking = await Booking.findById(booking._id)
-                                       .populate('userId', 'email') // Need user for notification
-                                       .populate('restaurantId', 'name'); // Need restaurant name
-      if (cancelledBooking && cancelledBooking.userId && cancelledBooking.restaurantId) {
+      if (populatedBooking && populatedBooking.userId && populatedBooking.restaurantId) {
+        console.log('Creating cancellation notification');
         await Notification.create({
-          userId: cancelledBooking.userId._id,
-          message: `Your booking at ${cancelledBooking.restaurantId.name} for ${moment(cancelledBooking.date).format('MMMM Do YYYY')} at ${cancelledBooking.time} has been cancelled.`,
+          userId: populatedBooking.userId._id,
+          message: `Your booking at ${populatedBooking.restaurantId.name} for ${moment(populatedBooking.date).format('MMMM Do YYYY')} at ${populatedBooking.time} has been cancelled.`,
           type: 'booking_cancelled',
-          bookingId: cancelledBooking._id
+          bookingId: populatedBooking._id
         });
-      } else {
-         console.error('Failed to populate booking details for cancellation notification.');
+        console.log('Cancellation notification created successfully');
       }
     } catch (notificationError) {
       console.error('Failed to create booking cancellation notification:', notificationError);
-      // Log this error for monitoring
     }
 
-    // Send back the updated booking (status: 'cancelled')
-    // res.json(booking); // booking object here is not populated with restaurant name for notification message
-    // Instead, send back the populated one if available, or the original if population failed
-    const finalBookingResponse = await Booking.findById(booking._id)
-                                      .populate('userId', 'firstName lastName email')
-                                      .populate('restaurantId', 'name address');
-
-    res.json(finalBookingResponse || booking); 
+    console.log('Cancellation process completed successfully');
+    res.json(populatedBooking || booking);
   } catch (error) {
-    console.error('Error cancelling booking:', error); 
+    console.error('Error cancelling booking:', error);
     res.status(500).json({ error: 'Error cancelling booking' });
   }
 };
