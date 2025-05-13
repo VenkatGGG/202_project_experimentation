@@ -323,6 +323,11 @@ exports.getBookingAnalytics = async (req, res) => {
         }
       },
       {
+        $match: {
+          convertedBookingDate: { $ne: null }
+        }
+      },
+      {
         $group: {
           _id: {
             year: { $year: '$convertedBookingDate' },
@@ -334,7 +339,7 @@ exports.getBookingAnalytics = async (req, res) => {
         }
       },
       {
-        $sort: { '_id.year': -1, '_id.month': -1, '_id.day': -1 }
+        $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } // Changed to ascending
       }
     ]);
 
